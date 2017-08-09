@@ -323,5 +323,5 @@
 	  (t/stream *standard-input*)
 	  (t/path src)))))
 
-#+nil
-(computer:it "com")
+#+nil (load "simple-ops.arch")
+#+nil (computer:it "com")
