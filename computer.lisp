@@ -196,30 +196,23 @@
 (defvar *stop*)
 (defvar *skip*)
 
-(defparameter *g2*
+(defun noop (&rest args)
+  (declare (ignore args))
+  ())
+
+(defparameter *op-arity*
   (make-array '(256)
 	      :element-type '(unsigned-byte 8)
 	      :initial-element 255))
 
-(defun symbolic (string)
-  (intern string))
+(defparameter *op-fun*
+  (make-array '(256)
+	      :element-type 'symbol
+	      :initial-element 'noop))
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun g2-n (n)
-    (symbolic (format nil "G2-~X" n))))
-
-(defmacro g2 (n arg &body body)
-  (declare (type (unsigned-byte 8) n)
-	   (type list arg))
-  (let ((g2-n (g2-n n))
-	(l (length arg)))
-    `(progn
-       (defun ,g2-n ,arg
-	 ,@body)
-       (setf (aref *g2* ,n) ,l)
-       (values ',g2-n ,l))))
-
-(load "g2")
+(defun computer-op (n arity label)
+  (setf (aref *op-arity* n) arity
+        (aref *op-fun* n) label))
 
 (defun yro-2 (vl vp ol of op)
   (declare (ignore of))
@@ -231,12 +224,14 @@
 		  gb)
 	      aa)))
     (let* ((n (first aa))
-	   (a (aref *g2* n)))
+	   (a (aref *op-arity* n))
+           (f (aref *op-fun* n)))
       (unless (< a 255)
 	(error "unknown op #x~X" n))
-      (dbg "~A ~S" (g2-n n) aa)
-      (values t (apply (g2-n n) (rest aa))))))
+      (dbg "op ~S ~S" f aa)
+      (values t (apply f (rest aa))))))
 
+#+nil
 (trace yro yro-1 yro-2)
 
 (defun yro (vl vp ol of op)
