@@ -3,8 +3,20 @@
 
 (defpackage :computer
   (:use :common-lisp)
-  (:export #:boot
-	   #:it))
+  (:export #:*skip*
+           #:*stop*
+           #:ti
+           #:te
+           #:tp
+           #:t_
+           #:tv
+           #:tw
+           #:t-
+           #:ub16
+           #:t--
+           #:boot
+           #:it
+           #:computer-op))
 
 (in-package :computer)
 
