@@ -1,9 +1,13 @@
 
 (in-package :common-lisp-user)
 
+(load "op")
+
 (defpackage :simple-ops
   (:use :common-lisp
-        :computer)
+        :computer
+        :op
+        :program)
   (:export #:stop
            #:stop]]
            #:jump]]
@@ -48,6 +52,8 @@
            #:[>>]]
            #:[decrement]
            #:[increment]))
+
+(in-package :simple-ops)
 
 (op stop ()
   (setf *stop* t))
@@ -278,3 +284,6 @@
 ;; increment
 (op [increment] ()
   (tw (1+ (t-))))
+
+(write-ops :path "simple-ops.arch.lisp")
+(write-ops-out :path "simple-ops.include.lisp")
