@@ -109,11 +109,11 @@
   `(define-gr ',label ',in ',out))
 
 (defun write-gr (gr stream)
-  (flet ((b (&rest bytes)
-           (dolist (b bytes)
-             (etypecase b
-               (list (apply #'b b))
-               ((unsigned-byte 8) (write-byte b stream))))))
+  (labels ((b (&rest bytes)
+             (dolist (b bytes)
+               (etypecase b
+                 (list (apply #'b b))
+                 ((unsigned-byte 8) (write-byte b stream))))))
     (let* ((bindings (gr-bindings gr))
            (bindings-length (length bindings))
            (in (gr-in-bound gr))
@@ -131,11 +131,14 @@
          out-length
          out))))
 
+(defun write-g-to-stream (grs stream)
+  (dolist (gr grs)
+    (write-gr gr stream)))
+
 (defun write-g (&key (path ".g") (grs *grs*) stream)
   (if stream
-      #1=(dolist (gr grs)
-           (write-gr gr stream))
-      (with-open-file (stream path :direction :output
-                              :element-type '(unsigned-byte 8)
-                              :if-exists :supersede)
-        #1#)))
+      (write-g-to-stream grs stream)
+      (with-open-file (s path :direction :output
+                         :element-type '(unsigned-byte 8)
+                         :if-exists :supersede)
+        (write-g-to-stream grs s))))
