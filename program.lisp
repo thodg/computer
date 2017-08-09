@@ -4,7 +4,17 @@
 (defpackage :program
   (:use :common-lisp)
   (:shadow #:write)
-  (:export #:program))
+  (:export
+   #:*b*
+   #:program
+   #:b
+   #:b0
+   #:b1
+   #:code@=
+   #:code@
+   #:data@
+   #:pad
+   #:data))
 
 (in-package :program)
 
@@ -203,16 +213,13 @@
 (defun data-value (label size value)
   (unless (<= (length value) size)
     (error "data value larger than size"))
-  (let ((data-start (gensym "DATA-START-"))
-        (e (gensym "E-"))
-        bytes)
-    `((code@= ',label)
-      ,@(mapcan (lambda (v)
-                  (etypecase v
-                    ((unsigned-byte 8) `((w ,v ',label)))
-                    ((unsigned-byte 16) `((w ,(b1 v) ',label)
-                                          (w ,(b0 v) '(,label 1))))))
-                 value))))
+  `((code@= ',label)
+    ,@(mapcan (lambda (v)
+                (etypecase v
+                  ((unsigned-byte 8) `((w ,v ',label)))
+                  ((unsigned-byte 16) `((w ,(b1 v) ',label)
+                                        (w ,(b0 v) '(,label 1))))))
+              value)))
 
 (defun data-def (def)
   (destructuring-bind (label size &rest value) def
@@ -248,6 +255,7 @@
        (code@= ',init)
        ,@(data-inits defs data))))
 
+#+nil
 (program "com"
   (data (result 10)
         (counter 1 0))
@@ -310,8 +318,10 @@
       (force-output)
       code)))
 
+#+nil
 (commit "com")
 
+#+nil
 (program "x"
   (data (n 2 10))
   (code@= :print)
