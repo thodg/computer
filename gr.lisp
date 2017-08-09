@@ -91,18 +91,19 @@
   ())
 
 (defun define-gr (label in out)
-  (let ((n (make-instance 'gr :label label :in in :out out)))
+  (let ((gr (make-instance 'gr :label label :in in :out out)))
     (unless (not (find label *grs* :key #'gr-label))
       (warn "Redefining GR ~S" label)
       (setf *grs* (remove label *grs* :key #'gr-label)))
     (dolist (r *grs*)
-      (unless (not (equalp (gr-in-bound n) (gr-in-bound r)))
+      (unless (not (equalp (gr-in-bound gr) (gr-in-bound r)))
         (error "Duplicate input for rules ~S and ~S"
-               (gr-label r) (gr-label n)))
-      (unless (not (equalp (gr-out-bound n) (gr-out-bound r)))
+               (gr-label r) (gr-label gr)))
+      (unless (not (equalp (gr-out-bound gr) (gr-out-bound r)))
         (warn "Duplicate output for rules ~S and ~S"
-              (gr-label r) (gr-label n))))
-    (push n *grs*)))
+              (gr-label r) (gr-label gr))))
+    (push gr *grs*)
+    gr))
 
 (defmacro gr (label in &body out)
   `(define-gr ',label ',in ',out))
