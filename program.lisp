@@ -1,8 +1,11 @@
 
 (in-package :common-lisp-user)
 
+(load "binary")
+
 (defpackage :program
-  (:use :common-lisp)
+  (:use :common-lisp
+        :binary)
   (:shadow #:write)
   (:export
    #:*b*
@@ -10,6 +13,7 @@
    #:b
    #:b0
    #:b1
+   #:ub8
    #:code@=
    #:code@
    #:data@
@@ -43,9 +47,13 @@
         r)))
 
 (defclass data-reference (reference)
-  ((size :initarg :size
+  ((binary :initarg :binary
+           :initform 'ub8
+           :reader reference-binary
+           :type symbol)
+   (size :initarg :size
          :initform -1
-         :accessor reference-size
+         :reader reference-size
          :type fixnum)))
 
 (defvar *data-references*)
@@ -96,20 +104,28 @@
       (push *b* (reference-usage r)))
     (b (b1 offset) (b0 offset))))
 
-(defun data@ (label &optional offset size)
+(defun data@= (label offset type &optional (size 1))
   (let ((r (data-reference label)))
-    (if size
-        (if offset
-            (if (= -1 (reference-offset r))
-                (setf (reference-offset r) offset
-                      (reference-size r) size)
-                (error "duplicate data ~A" label))
-            (error "missing offset"))
-        (let ((o (reference-offset r)))
-          (unless (<= 0 o)
-            (push *b* (reference-usage r)))
-          (let ((o+ (+ (reference-offset r) (or offset 0))))
-            (b (b1 o+) (b0 o+)))))))
+    (if (= -1 (reference-offset r))
+        (setf (reference-offset r) offset
+              (reference-type r) type
+              (reference-size r) size)
+        (error "duplicate data ~A" label))
+    ))
+
+(defun b-reference (r nth)
+  (let ((o+ (+ (reference-offset r)
+               (* nth (binary-size (reference-binary r))))))
+    (b (b1 o+) (b0 o+))))
+
+(defun data@ (label &optional (nth 0))
+  (let ((r (data-reference label)))
+    (unless (< nth (reference-size r))
+      (error "out of bounds"))
+    (let ((o (reference-offset r)))
+      (unless (<= 0 o)
+        (push `(,*b* ,nth) (reference-usage r)))
+      (b-reference r nth))))
 
 (defun write-references (references)
   (dolist (r references)
@@ -120,87 +136,6 @@
         (file-position *stream* u)
         (write-byte (b1 offset) *stream*)
         (write-byte (b0 offset) *stream*)))))
-
-(defun stop ()
-  (b #x00))
-
-(defun stop@ (&optional e)
-  (unless (null e)
-    (w (b1 e))
-    (w (b0 e)))
-  (b #x01))
-
-(defun jump (&optional p)
-  (etypecase p
-    (null (b #x10))
-    (symbol (b #x12) (code@ p))
-    ((unsigned-byte 16) (b #x12 (b1 p) (b0 p)))))
-
-(defun pad (to &optional (b 0))
-  (loop
-     (unless (< *b* to)
-       (return))
-     (b b)))
-
-(defun copy ()
-  (b #x3F))
-
-(defun w (b &optional p)
-  (etypecase p
-    (null (b #x40 b))
-    (symbol (b #x42) (data@ p))
-    ((unsigned-byte 16) (b #x42 b (b1 p) (b0 p)))
-    (list (destructuring-bind (label index) p
-            (b #x42) (data@ label index)))))
-
-(defun w@ (&optional p)
-  (etypecase p
-    (null (b #x43))
-    (symbol (b #x44) (data@ p))
-    ((unsigned-byte 16) (b #x44 (b1 p) (b0 p)))))
-
-(defun r (&optional p)
-  (etypecase p
-    (null (b #x30))
-    (symbol (b #x31) (data@ p))
-    ((unsigned-byte 16) (b #x31 (b1 p) (b0 p)))))
-
-(defun ti= (&optional i)
-  (etypecase i
-    (null (b #x50))
-    (symbol (b #x51) (code@ i))
-    ((unsigned-byte 16) (b #x51 (b1 i) (b0 i)))))
-
-(defun lt (&optional x y)
-  (etypecase y
-    (null)
-    (symbol (r y))
-    ((unsigned-byte 8) (w y)))
-  (etypecase x
-    (null (or (null y) (error "lt")))
-    (symbol (r x))
-    ((unsigned-byte 8) (w x)))
-  (b #x71))
-
-(defun lte (&optional x y)
-  (etypecase x
-    (null (or (null y) (error "lte")))
-    (symbol (r x))
-    ((unsigned-byte 8) (w x)))
-  (etypecase y
-    (null)
-    (symbol (r y))
-    ((unsigned-byte 8) (w y)))
-  (b #x73))
-
-(defun test ()
-  (b #x20))
-
-(defun decrement ()
-  (b #x90))
-
-(defun increment ()
-  (b #x91))
 
 (defun data-size (defs)
   (let ((size 0))
@@ -255,29 +190,6 @@
        (code@= ',init)
        ,@(data-inits defs data))))
 
-#+nil
-(program "com"
-  (data (result 10)
-        (counter 1 0))
-  (ti= :loop)
-  (code@= :loop)
-  (lte 10 'counter)
-  (test)
-  (jump :exit)
-  (r 'counter)
-   (copy)
-    (w 0)
-     (r 'counter)
-      (w@)
-   (increment)
-   (w@ 'counter)
-  (jump :loop)
-
-  (code@= :exit)
-  (w #x00)
-  (r 'counter)
-   (stop@))
-
 (defvar *r*)
 
 (defun r ()
@@ -317,12 +229,3 @@
            (setf code `(,@code ,i))))
       (force-output)
       code)))
-
-#+nil
-(commit "com")
-
-#+nil
-(program "x"
-  (data (n 2 10))
-  (code@= :print)
-  ())

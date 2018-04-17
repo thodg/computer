@@ -6,6 +6,7 @@
 (defpackage :simple-ops
   (:use :common-lisp
         :computer
+        :binary
         :op
         :program)
   (:export #:stop
@@ -54,6 +55,10 @@
            #:[increment]))
 
 (in-package :simple-ops)
+
+(binary ub8 8)
+(binary code@ 16)
+(binary data@ 16)
 
 (op stop ()
   (setf *stop* t))
@@ -172,16 +177,16 @@
   (setf (ti) (t--)))
 
 ;; 16 bits set ti
-(op ti (i1 i0)
-  (setf (ti) (ub16 i1 i0)))
+(op ti ((i @))
+  (setf (ti) i))
 
 ;; 16 bits stack set te
 (op te]] ()
   (setf (te) (t--)))
 
 ;; 16 bits set te
-(op te (e1 e0)
-  (setf (te) (ub16 e1 e0)))
+(op te ((e @))
+  (setf (te) e))
 
 ;; 16 bits lt
 (op [lt]]]] ()
@@ -285,5 +290,4 @@
 (op [increment] ()
   (tw (1+ (t-))))
 
-(write-ops :path "simple-ops.arch.lisp")
-(write-ops-out :path "simple-ops.include.lisp")
+(write-ops "simple-ops")

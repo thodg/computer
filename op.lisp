@@ -3,12 +3,14 @@
 
 (load "computer")
 (load "gr")
+(load "binary")
 (load "program")
 
 (defpackage :op
   (:use :common-lisp
         :computer
         :gr
+        :binary
         :program)
   (:export #:op
            #:op-label
@@ -17,8 +19,9 @@
            #:define-op
            #:op-gr
            #:ops-gr
-           #:write-ops
-           #:write-ops-out))
+           #:write-ops-arch
+           #:write-ops-include
+           #:write-ops))
 
 (in-package :op)
 
@@ -29,16 +32,80 @@
    (lambda-list :initarg :lambda-list
                 :reader op-lambda-list
                 :type list)
+   (lambda-list-ub8 :type list)
    (gr :type list)
    (body :initarg :body
          :reader op-body
          :type list)
-   (defun :type list)
-   (out-defun :type list)))
+   (arch-defun :type list)
+   (include-defun :type list)))
 
+(defgeneric op-lambda-list-ub8 (op))
 (defgeneric op-gr (op))
-(defgeneric op-defun (op))
-(defgeneric op-out-defun (op))
+(defgeneric op-arch-defun (op))
+(defgeneric op-include-defun (op))
+
+(defmethod print-object ((o op) stream)
+  (print-unreadable-object (o stream :type t)
+    (format stream "~A ~A"
+            (op-label o)
+            (op-lambda-list o))))
+
+(defmacro memoize-slot ((instance slot) &body body)
+  (let ((ginstance (gensym "INSTANCE-"))
+        (gslot (gensym "SLOT-")))
+    `(let ((,ginstance ,instance)
+           (,gslot ,slot))
+       (if (slot-boundp ,ginstance ,gslot)
+           (slot-value ,ginstance ,gslot)
+           (setf (slot-value ,ginstance ,gslot)
+                 (progn ,@body))))))
+
+(defmacro do-lambda-terms ((var &optional binary) op &body body)
+  (let ((term (gensym "TERM-")))
+    `(dolist (,term (op-lambda-list ,op))
+       (etypecase ,term
+         (list (let ((,var (first ,term))
+                     ,@(unless (null binary)
+                         `((,binary (second ,term)))))
+                 ,@body))
+         (symbol (let ((,var ,term)
+                       ,@(unless (null binary)
+                           `((,binary 'ub8))))
+                   ,@body))))))
+
+(defmethod op-lambda-list-ub8 ((op op))
+  (memoize-slot (op 'lambda-list-ub8)
+    (let (args)
+      (do-lambda-terms (term binary) op
+        (dotimes (i (ceiling (binary-size binary) 8))
+          (push (term-n term i) args)))
+      (nreverse args))))
+
+(defmethod op-gr ((op op))
+  (memoize-slot (op 'gr)
+    (let* ((op-code (op-code))
+           (args (op-lambda-list-ub8 op))
+           (in `(,op-code ,@args))
+           (out `(2 ,op-code ,@args)))
+      (define-gr (op-label op) in out))))
+
+(defmethod op-arch-defun ((op op))
+  (memoize-slot (op 'arch-defun)
+    `(defun ,(op-label op) ,(op-lambda-list-ub8 op)
+       (let (,@(op-arch-vars op))
+         ,@(op-body op)))))
+
+(defmethod op-include-defun ((op op))
+  (memoize-slot (op 'include-defun)
+    (let (args body)
+      (do-lambda-terms (term type) op
+        (push term args)
+        (push (op-defun-b term type) body))
+      (setf args (nreverse args)
+            body (nreverse body))
+      `(defun ,(op-label op) ,args
+         ,body))))
 
 (defvar *ops*
   ())
@@ -47,7 +114,10 @@
   (unless (not (find label *ops* :key #'op-label))
     (warn "Redefining op ~S" label)
     (setf *ops* (remove label *ops* :key #'op-label)))
-  (let ((op (make-instance 'op :label label :lambda-list lambda-list :body body)))
+  (let ((op (make-instance 'op
+                           :label label
+                           :lambda-list lambda-list
+                           :body body)))
     (push op *ops*)
     op))
 
@@ -60,26 +130,30 @@
                                  (first (gr-in-bound gr))))
       (return i))))
 
-(defmethod op-gr ((op op))
-  (if (slot-boundp op 'gr)
-      (slot-value op 'gr)
-      (setf (slot-value op 'gr)
-            (let* ((op-code (op-code))
-                   (op-lambda-list (op-lambda-list op))
-                   (in `(,op-code ,@op-lambda-list))
-                   (out `(2 ,op-code ,@op-lambda-list)))
-              (define-gr (op-label op) in out)))))
+(defun term-n (term n)
+  (if (= 0 n)
+      term
+      (intern (format nil "~A~D" term n))))
 
 (defun ops-gr (&optional (ops *ops*))
   (dolist (o ops)
     (op-gr o)))
 
-(defmethod op-defun ((op op))
-  (if (slot-boundp op 'defun)
-      (slot-value op 'defun)
-      (setf (slot-value op 'defun)
-            `(defun ,(op-label op) ,(op-lambda-list op)
-               ,@(op-body op)))))
+(defgeneric ub8-to (binary bytes))
+
+(defmethod ub8-to ((binary (eql 'ub8)) (bytes list))
+  (assert (endp (rest bytes)))
+  (first bytes))
+
+(defun op-arch-vars (op)
+  (let (vars)
+    (do-lambda-terms (term binary) op
+      (let (terms)
+        (dotimes (i (ceiling (binary-size binary) 8))
+          (push (term-n term i) terms))
+        (push `(term ,(ub8-to binary (nreverse terms))) vars)))
+    (nreverse vars)))
+
 
 (defvar *stream*)
 
@@ -89,9 +163,9 @@
       (character (write-char x *stream*))
       (t (format *stream* "~S~%" x)))))
 
-(defun write-op (op)
+(defun output-op-arch (op)
   (let ((out (gr-out-bound (op-gr op))))
-    (output (op-defun op)
+    (output (op-arch-defun op)
             #\Newline
             `(computer-op ,(second out)
                           ,(length (rest (rest out)))
@@ -103,7 +177,8 @@
       (push (string-upcase (op-label op)) exports))
     (nreverse exports)))
 
-(defun write-ops-to-stream (ops stream &optional (package *package*))
+(defun write-ops-arch-to-stream (ops stream
+                                 &optional (package *package*))
   (let ((package-name (package-name package))
         (*stream* stream))
     (output `(in-package :common-lisp-user)
@@ -115,29 +190,49 @@
             `(in-package ,package-name))
     (dolist (op (reverse ops))
       (output #\Newline)
-      (write-op op))))
+      (output-op-arch op))))
 
-(defun write-ops (&key (path "computer-ops.lisp") (ops *ops*)
-                    (package *package*) stream)
+(defun write-ops-arch (&key name path (ops *ops*)
+                         (package *package*) stream)
   (if stream
-      (write-ops-to-stream ops stream package)
-      (with-open-file (s path :direction :output
-                         :element-type 'character
-                         :external-format :utf-8
-                         :if-exists :supersede)
-        (write-ops-to-stream ops s package))))
+      (write-ops-arch-to-stream ops stream package)
+      (progn
+        (unless path
+          (unless name
+            (error "Missing name or path argument."))
+          (setq path (format nil "arch/~A.lisp" name)))
+        (with-open-file (s path :direction :output
+                           :element-type 'character
+                           :external-format :utf-8
+                           :if-exists :supersede)
+          (write-ops-arch-to-stream ops s package)))))
 
-(defmethod op-out-defun ((op op))
-  (if (slot-boundp op 'out-defun)
-      (slot-value op 'out-defun)
-      (setf (slot-value op 'out-defun)
-            `(defun ,(op-label op) ,(op-lambda-list op)
-               (b ,@(gr-in (op-gr op)))))))
+(defgeneric op-lambda-term-include (term binary))
 
-(defun write-op-out (op)
-  (output (op-out-defun op)))
+(defmethod op-lambda-term-include ((term symbol) (binary (eql 'ub8)))
+  `(b ,term))
 
-(defun write-ops-out-to-stream (ops stream &optional (package *package*))
+(defmethod op-lambda-term-include ((term symbol) (binary (eql 'ub16)))
+  `(b (b1 ,term) (b0 ,term)))
+
+(defmethod op-lambda-term-include ((term symbol) (binary (eql 'code@)))
+  `(etypecase ,term
+     (symbol (code@ ,term))
+     ((unsigned-byte 16) (b (b1 ,term) (b0 ,term)))))
+
+(defmethod op-lambda-term-include ((term symbol) (binary (eql 'data@)))
+  (let ((label (gensym "LABEL-"))
+        (offset (gensym "OFFSET-")))
+    `(etypecase ,term
+       (symbol (data@ ,term))
+       (list (apply #'data@ ,term))
+       ((unsigned-byte 16) (b (b1 ,term) (b0 ,term))))))
+
+(defun output-op-include (op)
+  (output (op-include-defun op)))
+
+(defun write-ops-include-to-stream (ops stream
+                                    &optional (package *package*))
   (let ((package-name (package-name package))
         (*stream* stream))
     (output `(in-package :common-lisp-user)
@@ -149,14 +244,24 @@
             `(in-package ,package-name))
     (dolist (op (reverse ops))
       (output #\Newline)
-      (write-op-out op))))
+      (output-op-include op))))
 
-(defun write-ops-out (&key (path "program-ops.lisp") (ops *ops*)
-                        (package *package*) stream)
+(defun write-ops-include (&key name path (ops *ops*)
+                            (package *package*) stream)
   (if stream
-      (write-ops-out-to-stream ops stream package)
-      (with-open-file (s path :direction :output
-                         :element-type 'character
-                         :external-format :utf-8
-                         :if-exists :supersede)
-        (write-ops-out-to-stream ops s package))))
+      (write-ops-include-to-stream ops stream package)
+      (progn
+        (unless path
+          (unless name
+            (error "Missing name or path argument."))
+          (setq path (format nil "include/~A.lisp" name)))
+        (with-open-file (s path
+                           :direction :output
+                           :element-type 'character
+                           :external-format :utf-8
+                           :if-exists :supersede)
+          (write-ops-out-to-stream ops s package)))))
+
+(defun write-ops (name)
+  (write-ops-arch :name name)
+  (write-ops-include :name name))
